@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from geopandas import GeoDataFrame
 from fiona.errors import FionaValueError
 import shapely
+import pandas as pd
 
 
 STYLES = {
@@ -30,6 +31,16 @@ STYLES = {
     'LocalRoute': 'ff79c678',
     'LocalRouteRestricted': 'ff438423'
 }
+
+
+class Route(object):
+
+
+    def __init__(self, Descriptio, Street, Restrictio, geometry):
+        self.Descriptio = Descriptio
+        self.Street = Street
+        self.Restrictio = Restrictio
+        self.geometry = geometry
 
 
 class TruckRouteExtractor:
@@ -110,7 +121,7 @@ class TruckRouteExtractor:
 
     def create_doc(self, route, file_no):
         route_name = route.replace(' ', '_') + 's_' + str(file_no)
-        self.set_doc_metadata(route_name)
+        self.set_doc_metadata(route+'s')
         doc_content = self.soup.prettify(formatter='minimal')
         doc_name = '{}{}.kml'.format(self.prefix, route_name)
 
@@ -125,20 +136,35 @@ class TruckRouteExtractor:
         re_pattern = re.compile(pattern)
         routes = data[data['Descriptio'].str.contains(re_pattern)]
         routes = routes.to_crs(epsg=4326)
+        fields = ['Descriptio', 'Street', 'Restrictio']
+        groups = routes.groupby(fields).agg(lambda x: shapely.ops.linemerge(x.values))
         folder = self.soup.kml.Document.Folder
         file_no = 1
         counter = 0
         total = 0
         # length = len(placemarks)
-        for index, route in routes.iterrows():
-            # print '\r{}/{}'.format(i, len(placemarks)),
-            total += 1
-            folder.append(self.get_placemark(route))
-            counter += 1
-            if counter == self.limit:
-                counter = 0
-                self.create_doc(pattern, file_no)
-                file_no += 1
+        for group in groups.iterrows():
+            geometry = group[1].geometry
+            # print 'group[1].geometry: {}'.format(group[1].geometry)
+            if isinstance(geometry, shapely.geometry.linestring.LineString):
+                route = Route(*(group[1].name+(geometry,)))
+                total += 1
+                folder.append(self.get_placemark(route))
+                counter += 1
+                if counter == self.limit:
+                    counter = 0
+                    self.create_doc(pattern, file_no)
+                    file_no += 1
+            else:
+                for geom in geometry.geoms:
+                    route = Route(*(group[1].name+(geom,)))
+                    total += 1
+                    folder.append(self.get_placemark(route))
+                    counter += 1
+                    if counter == self.limit:
+                        counter = 0
+                        self.create_doc(pattern, file_no)
+                        file_no += 1
         self.create_doc(pattern, file_no)
         print 'Total of %s placemarks' % total
 
@@ -149,7 +175,7 @@ class TruckRouteExtractor:
         coordinates = self.coords_to_str(route.geometry.coords)
         description = self.get_route_description(route)
 
-        placemark = new_tag('Placemark', id='ID_{}'.format(route.name))
+        placemark = new_tag('Placemark')
 
         placemark.append(new_tag('name'))
         placemark.find('name').string = route.Street
@@ -192,21 +218,6 @@ class TruckRouteExtractor:
         # style = '#LocalRoute'
         return style
 
-    def playground(self):
-        print '=== data: {} ==='.format(len(self.data))
-        agg = self.data.groupby(['Descriptio', 'Street', 'Restrictio']).agg(lambda x: shapely.ops.linemerge(x.values))
-
-        counter = 0
-        for group in agg.iterrows():
-            item =  group[1][0]
-
-            if isinstance(item, shapely.geometry.linestring.LineString):
-                counter += 1
-            else:
-                counter += len(item.geoms)
-
-        print 'total of {} lines'.format(counter)
-        print '=== agg: {} ==='.format(len(agg))
 
 def main():
     parser = argparse.ArgumentParser(
@@ -224,8 +235,7 @@ def main():
 
     args = parser.parse_args()
     tre = TruckRouteExtractor(**vars(args))
-    # tre.extract_routes()
-    tre.playground()
+    tre.extract_routes()
 
 
 
