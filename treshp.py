@@ -137,17 +137,13 @@ class TruckRouteExtractor:
         routes = data[data['Descriptio'].str.contains(re_pattern)]
         routes = routes.to_crs(epsg=4326)
         fields = ['Descriptio', 'Street', 'Restrictio']
-        groups = routes.groupby(fields).agg(lambda x: shapely.ops.linemerge(x.values))
+        routes = routes.groupby(fields, as_index=False).agg(lambda x: shapely.ops.linemerge(x.values))
         folder = self.soup.kml.Document.Folder
         file_no = 1
         counter = 0
         total = 0
-        # length = len(placemarks)
-        for group in groups.iterrows():
-            geometry = group[1].geometry
-            # print 'group[1].geometry: {}'.format(group[1].geometry)
-            if isinstance(geometry, shapely.geometry.linestring.LineString):
-                route = Route(*(group[1].name+(geometry,)))
+        for index, route in routes.iterrows():
+            if isinstance(route.geometry, shapely.geometry.linestring.LineString):
                 total += 1
                 folder.append(self.get_placemark(route))
                 counter += 1
@@ -156,8 +152,8 @@ class TruckRouteExtractor:
                     self.create_doc(pattern, file_no)
                     file_no += 1
             else:
-                for geom in geometry.geoms:
-                    route = Route(*(group[1].name+(geom,)))
+                for geom in route.geometry.geoms:
+                    route.geometry = geom
                     total += 1
                     folder.append(self.get_placemark(route))
                     counter += 1
