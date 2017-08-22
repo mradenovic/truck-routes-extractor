@@ -129,38 +129,41 @@ class TruckRouteExtractor:
         print 'Created file: {}'.format(doc_name)
         self.soup.kml.Document.Folder.clear()
 
+    def check_file_limit(self, total, limit, file_no, pattern):
+        if limit == self.limit:
+            limit = 0
+            self.create_doc(pattern, file_no)
+            return total + 1, limit, file_no + 1
+        else:
+            return total + 1, limit + 1, file_no
 
-    def extract_route(self, pattern):
-        data = self.data
-        print 'Creating... : {}'.format(pattern)
+    def append_placemark(self, total, limit, file_no, route):
+        folder = self.soup.kml.Document.Folder
+
+
+    def get_routes(self, pattern):
+        data =self.data
         re_pattern = re.compile(pattern)
         routes = data[data['Descriptio'].str.contains(re_pattern)]
         routes = routes.to_crs(epsg=4326)
         fields = ['Descriptio', 'Street', 'Restrictio']
         routes = routes.groupby(fields, as_index=False).agg(lambda x: shapely.ops.linemerge(x.values))
+        return routes
+
+    def extract_route(self, pattern):
+        print 'Creating... : {}'.format(pattern)
+        routes = self.get_routes(pattern)
         folder = self.soup.kml.Document.Folder
-        file_no = 1
-        counter = 0
-        total = 0
+        total, limit, file_no = 0, 0, 1
         for index, route in routes.iterrows():
             if isinstance(route.geometry, shapely.geometry.linestring.LineString):
-                total += 1
                 folder.append(self.get_placemark(route))
-                counter += 1
-                if counter == self.limit:
-                    counter = 0
-                    self.create_doc(pattern, file_no)
-                    file_no += 1
+                total, limit, file_no = self.check_file_limit(total, limit, file_no, pattern)
             else:
                 for geom in route.geometry.geoms:
                     route.geometry = geom
-                    total += 1
                     folder.append(self.get_placemark(route))
-                    counter += 1
-                    if counter == self.limit:
-                        counter = 0
-                        self.create_doc(pattern, file_no)
-                        file_no += 1
+                    total, limit, file_no = self.check_file_limit(total, limit, file_no, pattern)
         self.create_doc(pattern, file_no)
         print 'Total of %s placemarks' % total
 
